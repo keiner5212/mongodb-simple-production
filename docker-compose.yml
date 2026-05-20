@@ -1,0 +1,84 @@
+# Production MongoDB stack for Debian EC2.
+# Copy .env.example to .env and adjust paths before first deploy.
+
+name: mongodb-prod
+
+services:
+  mongo:
+    image: mongo:${MONGO_VERSION:-7.0}
+    container_name: ${COMPOSE_PROJECT_NAME:-mongodb-prod}-mongo
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      # Host bind mount: survives container recreation; easy to snapshot on EC2
+      - ${MONGO_DATA_DIR}:/data/db
+      - ${MONGO_CONFIG_DIR}:/data/configdb
+    networks:
+      - mongodb_internal
+    ports:
+      # Bind to all interfaces; secure with firewall or security group
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "-u",
+          "${MONGO_ROOT_USERNAME}",
+          "-p",
+          "${MONGO_ROOT_PASSWORD}",
+          "--authenticationDatabase",
+          "admin",
+          "--eval",
+          "db.adminCommand('ping').ok",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${MONGO_MEMORY_LIMIT:-2g}
+
+  mongo-backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    image: ${COMPOSE_PROJECT_NAME:-mongodb-prod}-backup:local
+    container_name: ${COMPOSE_PROJECT_NAME:-mongodb-prod}-backup
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS}
+      BACKUP_MAX_COUNT: ${BACKUP_MAX_COUNT}
+      BACKUP_PATH: /backup
+    volumes:
+      - ${BACKUP_HOST_DIR}:/backup
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - mongodb_internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+networks:
+  mongodb_internal:
+    driver: bridge
+    name: ${COMPOSE_PROJECT_NAME:-mongodb-prod}_internal

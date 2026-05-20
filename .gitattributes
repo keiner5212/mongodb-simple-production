@@ -1,0 +1,2 @@
+*.sh text eol=lf
+backup/backup.sh text eol=lf
