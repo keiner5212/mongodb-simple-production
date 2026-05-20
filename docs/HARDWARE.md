@@ -41,7 +41,7 @@ Recommended `MONGO_MEMORY_LIMIT` (leave 1GB for OS):
 | r6i.xlarge | 32 GiB | 30g | ~15 GB |
 | r6i.2xlarge | 64 GiB | 62g | ~31 GB |
 
-WiredTiger cache = 50% of `MONGO_MEMORY_LIMIT`.
+WiredTiger cache = 50% of `MONGO_MEMORY_LIMIT`. Set `storage.wiredTiger.engineConfig.cacheSizeGB` in `config/mongod.conf` to match (e.g. `6g` limit → `3`).
 
 ## Network
 - Security group: allow SSH (22) + MongoDB (27017) from trusted IPs only

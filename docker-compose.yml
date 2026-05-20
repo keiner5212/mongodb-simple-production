@@ -17,6 +17,8 @@ services:
       # Host bind mount: survives container recreation; easy to snapshot on EC2
       - ${MONGO_DATA_DIR}:/data/db
       - ${MONGO_CONFIG_DIR}:/data/configdb
+      - ./config/mongod.conf:/etc/mongod.conf:ro
+    command: ["mongod", "--config", "/etc/mongod.conf"]
     networks:
       - mongodb_internal
     ports:
