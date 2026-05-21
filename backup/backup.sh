@@ -26,10 +26,24 @@ fi
 
 interval_seconds=$(( BACKUP_INTERVAL_HOURS * 3600 ))
 
+mongo_target_host() {
+  if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
+    if [[ -z "${MONGO_TLS_DOMAIN:-}" ]]; then
+      log "ERROR: MONGO_TLS_DOMAIN is required in .env when MONGO_TLS_ENABLED=true"
+      return 1
+    fi
+    printf '%s' "${MONGO_TLS_DOMAIN}"
+  else
+    printf '%s' "${MONGO_HOST:-mongo}"
+  fi
+}
+
 mongo_client_args() {
+  local host
   # shellcheck source=/dev/null
   source /usr/local/bin/mongo-tls-client-args.sh
-  MONGO_CLIENT_ARGS=(--host "${MONGO_HOST}" --port "${MONGO_PORT}")
+  host="$(mongo_target_host)" || return 1
+  MONGO_CLIENT_ARGS=(--host "${host}" --port "${MONGO_PORT}")
   if (( ${#MONGO_TLS_CLI_ARGS[@]} > 0 )); then
     MONGO_CLIENT_ARGS+=("${MONGO_TLS_CLI_ARGS[@]}")
   fi
@@ -48,7 +62,7 @@ wait_for_mongo() {
       -p "${MONGO_ROOT_PASSWORD}" \
       --authenticationDatabase admin \
       --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; then
-      log "MongoDB reachable at ${MONGO_HOST}:${MONGO_PORT}"
+      log "MongoDB reachable at $(mongo_target_host):${MONGO_PORT}"
       return 0
     fi
     log "Waiting for MongoDB (${i}/${retries})..."
