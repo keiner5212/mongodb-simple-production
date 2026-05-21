@@ -28,12 +28,7 @@ fi
 
 interval_seconds=$(( BACKUP_INTERVAL_HOURS * 3600 ))
 
-urlencode() {
-  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
-}
-
-# Same connection string as external clients (Compass, apps). With TLS, host is MONGO_TLS_DOMAIN
-# and extra_hosts in compose maps that name to the host gateway (published port 27017).
+# Same URI as external clients (?tls=true). Credentials via -u/-p (no python in backup image).
 mongo_uri() {
   local host params
 
@@ -49,10 +44,7 @@ mongo_uri() {
     params="authSource=admin&directConnection=true"
   fi
 
-  printf 'mongodb://%s:%s@%s:%s/?%s' \
-    "$(urlencode "${MONGO_ROOT_USERNAME}")" \
-    "$(urlencode "${MONGO_ROOT_PASSWORD}")" \
-    "${host}" "${MONGO_PORT}" "${params}"
+  printf 'mongodb://%s:%s/?%s' "${host}" "${MONGO_PORT}" "${params}"
 }
 
 wait_for_mongo() {
@@ -64,7 +56,10 @@ wait_for_mongo() {
   uri="$(mongo_uri)" || return 1
 
   for (( i = 1; i <= retries; i++ )); do
-    if mongosh "${uri}" --quiet --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; then
+    if mongosh "${uri}" --quiet \
+      -u "${MONGO_ROOT_USERNAME}" \
+      -p "${MONGO_ROOT_PASSWORD}" \
+      --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; then
       if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
         log "MongoDB reachable at ${MONGO_TLS_DOMAIN}:${MONGO_PORT} (external-style TLS)"
       else
@@ -92,7 +87,10 @@ run_backup() {
   mkdir -p "${dest}"
 
   log "Starting backup -> ${dest}"
-  mongodump --uri="${uri}" --gzip --out "${dest}"
+  mongodump --uri="${uri}" \
+    -u "${MONGO_ROOT_USERNAME}" \
+    -p "${MONGO_ROOT_PASSWORD}" \
+    --gzip --out "${dest}"
 
   log "Backup finished: ${dest}"
 }
