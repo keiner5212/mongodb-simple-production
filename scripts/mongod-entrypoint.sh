@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # WiredTiger cache = 50% of MONGO_MEMORY_LIMIT (same units as compose mem_limit).
-set -eu
-set -o pipefail
+set -Eeuo pipefail
 
 limit="${MONGO_MEMORY_LIMIT:-2g}"
 limit="$(printf '%s' "$limit" | tr '[:upper:]' '[:lower:]')"
@@ -33,8 +32,48 @@ BEGIN {
 
 echo "mongod-entrypoint: MONGO_MEMORY_LIMIT=${limit} -> wiredTigerCacheSizeGB=${cache_gb}" >&2
 
-exec docker-entrypoint.sh mongod \
-  --bind_ip_all \
-  --wiredTigerCacheSizeGB "${cache_gb}" \
-  --auth \
-  "$@"
+# Disable Transparent Huge Pages (THP) to avoid MongoDB startup warnings and latency spikes.
+# Requires the host to allow writes to sysfs from the container (privileged or custom udev rules).
+# If the write fails, the container still starts but a warning is printed with the host-level fix.
+_thp_dir="/sys/kernel/mm/transparent_hugepage"
+for _thp_path in \
+  "${_thp_dir}/enabled" \
+  "${_thp_dir}/defrag"; do
+  if [[ -w "${_thp_path}" ]]; then
+    echo never > "${_thp_path}"
+  fi
+done
+if [[ -f "${_thp_dir}/khugepaged/max_ptes_none" && -w "${_thp_dir}/khugepaged/max_ptes_none" ]]; then
+  echo 0 > "${_thp_dir}/khugepaged/max_ptes_none"
+fi
+if [[ -f "${_thp_dir}/enabled" ]] && grep -qE '\[(always|madvise)\]' "${_thp_dir}/enabled" 2>/dev/null; then
+  echo "mongod-entrypoint: WARNING: Transparent Huge Pages still enabled. Disable on the host:" >&2
+  echo "  echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled" >&2
+  echo "  echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag" >&2
+  echo "  echo 0     | sudo tee /sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none" >&2
+fi
+
+tls_args=()
+if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
+  tls_pem="/etc/mongo/tls/server.pem"
+  tls_mode="${MONGO_TLS_MODE:-requireTLS}"
+
+  if [[ ! -f "$tls_pem" ]]; then
+    echo "mongod-entrypoint: MONGO_TLS_ENABLED=true but missing ${tls_pem}. Run: sudo ./scripts/setup-letsencrypt-tls.sh" >&2
+    exit 1
+  fi
+
+  tls_args+=(--tlsMode "$tls_mode" --tlsCertificateKeyFile "$tls_pem")
+  echo "mongod-entrypoint: TLS enabled mode=${tls_mode}" >&2
+fi
+
+mongod_args=(
+  --bind_ip_all
+  --wiredTigerCacheSizeGB "${cache_gb}"
+  --auth
+)
+if ((${#tls_args[@]} > 0)); then
+  mongod_args+=("${tls_args[@]}")
+fi
+
+exec docker-entrypoint.sh mongod "${mongod_args[@]}" "$@"

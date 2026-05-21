@@ -1,53 +1,39 @@
-# Hardware Recommendations
+# Hardware
 
-## EC2 Instance Types
+This stack runs one MongoDB container on a single EC2 instance.
 
-| Use Case | Instance | vCPU | RAM | Price/mo |
-|---|---|---|---|---|
-| Development | t3.medium | 2 | 4 GiB | ~$30 |
-| Small Production | t3.large | 2 | 8 GiB | ~$60 |
-| Medium Production | r6i.xlarge | 4 | 32 GiB | ~$160 |
-| Large Production | r6i.2xlarge | 8 | 64 GiB | ~$320 |
+## Pick an instance
 
-Prices are approximate (us-east-1, on-demand, Linux).
+| Your case | EC2 type | RAM | Set in `.env` |
+|-----------|----------|-----|----------------|
+| First deploy / light use | t3.medium | 4 GB | `MONGO_MEMORY_LIMIT=3g` |
+| More data or traffic | t3.large | 8 GB | `MONGO_MEMORY_LIMIT=7g` |
 
-## Storage
+`MONGO_MEMORY_LIMIT` is the RAM cap for the mongo container. WiredTiger cache is half of that (set automatically).
 
-Use [EBS Pricing Calculator](https://cloudburn.io/tools/amazon-ebs-pricing-calculator?storageGB=10&region=eu-north-1) to estimate costs.
+Example: `MONGO_MEMORY_LIMIT=3g` → about 1.5 GB cache. You will see it in the logs:
 
-Bind mounts to host directories:
+```text
+mongod-entrypoint: MONGO_MEMORY_LIMIT=3g -> wiredTigerCacheSizeGB=1.5
+```
 
-| Purpose | Host Path | Estimate |
-|---|---|---|
-| Data + indexes | `/var/lib/mongodb/data` | Data size + 30% buffer |
-| Config | `/var/lib/mongodb/config` | ~10 MB |
-| Backups | `/var/backups/mongodb` | 2x largest backup |
+Leave about 1 GB RAM for Debian, Docker, and the backup container.
 
-gp3 recommended (cheaper, independent IOPS/throughput). For >16k IOPS needs, use io2.
+## Disk
 
-## Memory
+| Path | What |
+|------|------|
+| `/var/lib/mongodb/data` | Database files — size your data + ~30% |
+| `/var/backups/mongodb` | mongodump copies — keep ~2× your largest backup |
 
-OS and services overhead on dedicated host:
-- Debian + Docker: ~500-800 MB
-- mongo-backup container: ~100-200 MB (idle)
-- Total overhead: ~1 GB
-
-Recommended `MONGO_MEMORY_LIMIT` (leave 1GB for OS):
-
-| Instance | Total RAM | MONGO_MEMORY_LIMIT | WiredTiger Cache |
-|---|---|---|---|
-| t3.medium | 4 GiB | 3g | ~1.5 GB |
-| t3.large | 8 GiB | 7g | ~3.5 GB |
-| r6i.xlarge | 32 GiB | 30g | ~15 GB |
-| r6i.2xlarge | 64 GiB | 62g | ~31 GB |
-
-WiredTiger cache = 50% of `MONGO_MEMORY_LIMIT` (applied automatically by `scripts/mongod-entrypoint.sh`, e.g. `6g` → `3`).
+Use gp3 EBS volumes on AWS.
 
 ## Network
-- Security group: allow SSH (22) + MongoDB (27017) from trusted IPs only
 
-## Scaling
+Security group inbound:
 
-Vertical: stop, change instance type, start
+- **22** — your IP (SSH)
+- **27017** — MongoDB (world or `0.0.0.0/0` if everyone uses TLS + strong password)
+- **80** — only when running `setup-letsencrypt-tls.sh` (can remove later)
 
-Horizontal (sharding): not covered by this stack
+Use an **Elastic IP** so your DNS record and certificate stay valid after a reboot.

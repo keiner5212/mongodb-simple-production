@@ -5,7 +5,7 @@ name: mongodb-prod
 
 services:
   mongo:
-    image: mongo:${MONGO_VERSION:-7.0}
+    image: mongo:8.2.9
     container_name: ${COMPOSE_PROJECT_NAME:-mongodb-prod}-mongo
     restart: unless-stopped
     env_file:
@@ -13,11 +13,17 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_TLS_ENABLED: ${MONGO_TLS_ENABLED:-false}
+      MONGO_TLS_MODE: ${MONGO_TLS_MODE:-requireTLS}
+      MONGO_TLS_DIR: /etc/mongo/tls
     volumes:
       # Host bind mount: survives container recreation; easy to snapshot on EC2
       - ${MONGO_DATA_DIR}:/data/db
       - ${MONGO_CONFIG_DIR}:/data/configdb
+      - ${MONGO_TLS_DIR:-/var/lib/mongodb/tls}:/etc/mongo/tls:ro
       - ./scripts/mongod-entrypoint.sh:/usr/local/bin/mongod-custom-entrypoint.sh:ro
+      - ./scripts/mongo-healthcheck.sh:/usr/local/bin/mongo-healthcheck.sh:ro
+      - ./scripts/mongo-tls-client-args.sh:/usr/local/bin/mongo-tls-client-args.sh:ro
     entrypoint: ["/bin/bash", "/usr/local/bin/mongod-custom-entrypoint.sh"]
     networks:
       - mongodb_internal
@@ -25,24 +31,15 @@ services:
       # Bind to all interfaces; secure with firewall or security group
       - "${MONGO_PORT:-27017}:27017"
     healthcheck:
-      test:
-        [
-          "CMD",
-          "mongosh",
-          "--quiet",
-          "-u",
-          "${MONGO_ROOT_USERNAME}",
-          "-p",
-          "${MONGO_ROOT_PASSWORD}",
-          "--authenticationDatabase",
-          "admin",
-          "--eval",
-          "db.adminCommand('ping').ok",
-        ]
+      test: ["CMD", "/bin/bash", "/usr/local/bin/mongo-healthcheck.sh"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 40s
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     logging:
       driver: json-file
       options:
@@ -64,11 +61,15 @@ services:
       MONGO_PORT: "27017"
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_TLS_ENABLED: ${MONGO_TLS_ENABLED:-false}
+      MONGO_TLS_DIR: /etc/mongo/tls
       BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS}
       BACKUP_MAX_COUNT: ${BACKUP_MAX_COUNT}
       BACKUP_PATH: /backup
     volumes:
       - ${BACKUP_HOST_DIR}:/backup
+      - ${MONGO_TLS_DIR:-/var/lib/mongodb/tls}:/etc/mongo/tls:ro
+      - ./scripts/mongo-tls-client-args.sh:/usr/local/bin/mongo-tls-client-args.sh:ro
     depends_on:
       mongo:
         condition: service_healthy
@@ -79,6 +80,7 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
+    mem_limit: 256m
 
 networks:
   mongodb_internal:

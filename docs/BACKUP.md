@@ -1,34 +1,37 @@
-# Backup & Restore
+# Backups
 
-## Variables
+The `mongo-backup` container runs `mongodump` every 24 hours (default). Files land in:
 
-| Variable | Default | Description |
-|---|---|---|
-| `MONGO_HOST` | `mongo` (container name) | Use EC2 public DNS/IP for remote restore |
-| `MONGO_PORT` | `27017` | MongoDB port |
-| `MONGO_ROOT_USERNAME` | `admin` | From `.env` |
-| `MONGO_ROOT_PASSWORD` | - | From `.env` |
-| `BACKUP_HOST_DIR` | `/var/backups/mongodb` | Backup directory on host |
+```text
+/var/backups/mongodb/YYYYMMDDTHHMMSSZ/
+```
 
-## Restore
+Change schedule in `.env`: `BACKUP_INTERVAL_HOURS`, `BACKUP_MAX_COUNT`.
 
-Stop backup service, then restore:
+## Restore on the server
+
+Stop backups, restore, start again:
 
 ```bash
+cd /opt/mongo/mongodb-simple-production
 docker compose stop mongo-backup
 
-# Local restore (from EC2)
-mongorestore --host=127.0.0.1 --port=27017 -u=admin -p --authenticationDatabase=admin --gzip --drop /var/backups/mongodb/YYYYMMDDTHHMMSSZ/
+# Pick the folder name you want
+ls /var/backups/mongodb
 
-# Remote restore (from your machine)
-mongorestore --host=[EC2_PUBLIC_DNS] --port=27017 -u=admin -p --authenticationDatabase=admin --gzip --drop /var/backups/mongodb/YYYYMMDDTHHMMSSZ/
+# With TLS (after Part B in INSTALACION.md)
+mongorestore \
+  --host mongo.YOURDOMAIN.com \
+  --port 27017 \
+  --tls \
+  -u admin -p \
+  --authenticationDatabase admin \
+  --gzip --drop \
+  /var/backups/mongodb/20240115T030000Z/
 
 docker compose start mongo-backup
 ```
 
-Enter password interactively when prompted with `-p`.
+Use `--host 127.0.0.1` without `--tls` only if TLS is still disabled.
 
-## Backup Directory
-
-Format: `YYYYMMDDTHHMMSSZ/` (e.g., `20240115T030000Z/`)
-Location: `BACKUP_HOST_DIR` (default: `/var/backups/mongodb`)
+Enter the admin password when `-p` prompts you.

@@ -1,14 +1,10 @@
-# MongoDB Simple Production
+# MongoDB on EC2 (Docker)
 
-Single-node MongoDB 7.0 deployment on Debian EC2 with Docker Compose.
+One MongoDB server on a Debian EC2 instance: Docker Compose, daily backups, TLS (like Atlas).
 
-## Stack
+**Start here:** [docs/INSTALACION.md](docs/INSTALACION.md) — full setup from zero.
 
-- **mongo**: MongoDB 7.0; WiredTiger cache auto = 50% of `MONGO_MEMORY_LIMIT` via `scripts/mongod-entrypoint.sh`
-- **mongo-backup**: Automated mongodump service (24h interval)
+Other docs:
 
-## Docs
-
-- [Installation & troubleshooting](docs/INSTALACION.md) — deploy, env vars, common errors
-- [Hardware sizing](docs/HARDWARE.md)
-- [Backups](docs/BACKUP.md)
+- [Hardware](docs/HARDWARE.md) — instance size and RAM
+- [Backups](docs/BACKUP.md) — restore a dump

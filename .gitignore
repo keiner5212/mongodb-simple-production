@@ -1,3 +1,8 @@
 .env
 data/
 *.log
+**/tls/server.pem
+**/tls/*.key
+
+skills-lock.json
+.agents

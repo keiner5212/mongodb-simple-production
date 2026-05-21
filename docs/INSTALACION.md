@@ -1,130 +1,250 @@
-# Installation Guide
+# Install MongoDB on your EC2 server
 
-## 1. Transfer & Navigate
+Follow the steps in order. Replace `mongo.YOURDOMAIN.com` with your real hostname everywhere.
+
+---
+
+## Part A — MongoDB running
+
+### 1. Install Docker
+
+See [REQUISITOS.md](REQUISITOS.md) if Docker is not installed yet.
+
+### 2. Clone the project
 
 ```bash
-git clone https://github.com/keiner5212/mongodb-simple-production /opt/mongo/mongodb-simple-production
+sudo mkdir -p /opt/mongo
+sudo git clone https://github.com/keiner5212/mongodb-simple-production /opt/mongo/mongodb-simple-production
 cd /opt/mongo/mongodb-simple-production
 ```
 
-Create host data directories before first deploy:
+### 3. Create data folders
 
 ```bash
-sudo mkdir -p /var/lib/mongodb/data /var/lib/mongodb/config /var/backups/mongodb
+sudo mkdir -p /var/lib/mongodb/data /var/lib/mongodb/config /var/backups/mongodb /var/lib/mongodb/tls
 sudo chown -R "$(id -u)":"$(id -g)" /var/lib/mongodb /var/backups/mongodb
 ```
 
-## 2. Configure
+### 4. Configure `.env`
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-| Variable | Purpose |
-|----------|---------|
-| `MONGO_ROOT_PASSWORD` | **Required.** Strong admin password |
-| `MONGO_ROOT_USERNAME` | Admin user (default `admin`) |
-| `COMPOSE_PROJECT_NAME` | Stack name prefix (default `mongodb-prod`) |
-| `MONGO_DATA_DIR` | Host path → `/data/db` |
-| `MONGO_CONFIG_DIR` | Host path → `/data/configdb` |
-| `BACKUP_HOST_DIR` | Host path for mongodump archives |
-| `MONGO_MEMORY_LIMIT` | Container RAM cap (`6g`, `2g`, `512m`, …) |
+Change at minimum:
 
-### WiredTiger cache (automatic)
+- `MONGO_ROOT_PASSWORD` — long random password
+- `MONGO_MEMORY_LIMIT` — see [HARDWARE.md](HARDWARE.md) (example: `3g` on a 4 GB instance)
 
-`scripts/mongod-entrypoint.sh` runs before the official MongoDB image entrypoint. It reads `MONGO_MEMORY_LIMIT` from `.env` (same value as `mem_limit` in `docker-compose.yml`) and starts `mongod` with:
+Leave `MONGO_TLS_ENABLED=false` until Part B.
 
-- `--wiredTigerCacheSizeGB` = **50%** of that limit  
-- `--bind_ip_all`  
-- `--auth`
+### 5. Disable Transparent Huge Pages (THP) on the host
 
-Examples:
-
-| `MONGO_MEMORY_LIMIT` | Cache (`wiredTigerCacheSizeGB`) |
-|----------------------|----------------------------------|
-| `6g` | `3` |
-| `2g` | `1` |
-| `512m` | `0.25` (minimum) |
-
-On successful start, logs must show:
-
-```text
-mongod-entrypoint: MONGO_MEMORY_LIMIT=6g -> wiredTigerCacheSizeGB=3
-```
-
-Change only `MONGO_MEMORY_LIMIT` in `.env`, then recreate the mongo container (section 4).
-
-## 3. Deploy
+MongoDB warns and performs poorly when THP is enabled. On Debian 11/12 (systemd), create a service unit that runs before Docker on every boot:
 
 ```bash
+sudo tee /etc/systemd/system/disable-thp.service <<'EOF'
+[Unit]
+Description=Disable Transparent Huge Pages
+DefaultDependencies=no
+After=sysinit.target local-fs.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled'
+ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/defrag'
+ExecStart=/bin/sh -c 'echo 0 > /sys/kernel/mm/transparent_hugepage/khugepaged/max_ptes_none'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now disable-thp.service
+```
+
+Verify:
+
+```bash
+cat /sys/kernel/mm/transparent_hugepage/enabled
+# expected: always madvise [never]
+```
+
+The container entrypoint will also attempt to set these at startup and will print a warning with the commands above if THP is still enabled.
+
+### 6. Start MongoDB
+
+```bash
+sed -i 's/\r$//' scripts/*.sh
+chmod +x scripts/*.sh
 docker compose up -d --build
 docker compose ps
 ```
 
-## 4. Verify
+Both services should be up; `mongo` should be **healthy**.
+
+Test login:
+
+```bash
+docker compose exec mongo mongosh -u admin -p --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 })'
+```
+
+Enter the password from `.env` when prompted.
+
+---
+
+## Part B — Encrypted connections (TLS)
+
+Same idea as MongoDB Atlas: clients add `tls=true` and use your domain (not the EC2 IP). The server only accepts encrypted connections (`requireTLS`).
+
+**Plan a short maintenance window:** when you turn TLS on, every app and Compass user must use the new connection string immediately.
+
+### 7. DNS record
+
+In your domain provider, add:
+
+| Type | Name | Value |
+|------|------|--------|
+| A | `mongo` | Your EC2 **public** IP (use an Elastic IP so it does not change) |
+
+Check:
+
+```bash
+dig +short mongo.YOURDOMAIN.com
+```
+
+It must show your EC2 IP before continuing.
+
+Security group: allow inbound **80** and **27017** (80 is only needed to get the certificate).
+
+### 8. Get the certificate (on the server)
+
+```bash
+cd /opt/mongo/mongodb-simple-production
+
+export MONGO_TLS_DOMAIN=mongo.YOURDOMAIN.com
+export MONGO_TLS_LE_EMAIL=you@YOURDOMAIN.com
+export MONGO_TLS_DIR=/var/lib/mongodb/tls
+
+sudo -E ./scripts/setup-letsencrypt-tls.sh
+```
+
+Mongo stops for about one minute while certbot uses port 80. Your data in `/var/lib/mongodb/data` is not deleted.
+
+### 9. Enable TLS on the server
+
+Edit `.env`:
+
+```env
+MONGO_TLS_ENABLED=true
+MONGO_TLS_MODE=requireTLS
+```
+
+Apply:
+
+```bash
+docker compose up -d --build --force-recreate
+docker compose logs mongo --tail=15
+```
+
+You should see: `mongod-entrypoint: TLS enabled mode=requireTLS`.
+
+### 10. Update every client (required)
+
+Old connection (stops working):
+
+```text
+mongodb://admin:PASSWORD@13.x.x.x:27017/mydb
+```
+
+New connection:
+
+```text
+mongodb://admin:PASSWORD@mongo.YOURDOMAIN.com:27017/mydb?tls=true
+```
+
+**mongosh from a laptop:**
+
+```bash
+mongosh "mongodb://mongo.YOURDOMAIN.com:27017" \
+  --tls -u admin -p --authenticationDatabase admin
+```
+
+**MongoDB Compass:** paste the new URI.
+
+People with changing home IPs are fine — only the hostname and `tls=true` matter.
+
+---
+
+## Part C — After install
+
+### Update the project
+
+```bash
+cd /opt/mongo/mongodb-simple-production
+git pull
+docker compose up -d --force-recreate mongo
+```
+
+### View logs
 
 ```bash
 docker compose logs mongo --tail=30
-docker compose exec mongo mongosh -u "$MONGO_ROOT_USERNAME" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 })'
 ```
 
-Expected: mongo service **healthy**, backup service **running** (depends on healthy mongo).
+### Backups
 
-## 5. Troubleshooting
+Automatic dumps run every 24 hours into `/var/backups/mongodb`. See [BACKUP.md](BACKUP.md).
 
-### `mongod-custom-entrypoint.sh: lin: invalid option name` (exit code 2)
+---
 
-**Cause:** `scripts/mongod-entrypoint.sh` has Windows CRLF line endings (`\r\n`). Linux bash misreads `set -o pipefail` and fails at startup.
+## Common problems
 
-**Fix on EC2:**
+### `invalid option name` when mongo starts
+
+Windows line endings in scripts. Fix:
 
 ```bash
-sed -i 's/\r$//' scripts/mongod-entrypoint.sh
-file scripts/mongod-entrypoint.sh   # should NOT say "CRLF"
+sed -i 's/\r$//' scripts/*.sh
 docker compose up -d --force-recreate mongo
 ```
 
-Or: `dos2unix scripts/mongod-entrypoint.sh` if `dos2unix` is installed.
-
-**Prevent:** deploy with `git clone` / `git pull` on the server (not manual copy). Repo enforces LF on `*.sh` via `.gitattributes` and `.editorconfig`.
-
-**Check for CRLF:**
+### `mongo` is unhealthy
 
 ```bash
-cat -A scripts/mongod-entrypoint.sh | head -5
+docker compose logs mongo
 ```
 
-`^M` at line ends = CRLF → run `sed` above.
+Check `.env` password, TLS files (`/var/lib/mongodb/tls/server.pem`), and CRLF on scripts.
 
-### `unexpected "js-yaml.js" output while parsing config: null`
+### `certificate verify failed` in Compass or an app
 
-Removed in current stack: mongo no longer mounts `config/mongod.conf`. Pull latest `docker-compose.yml` and recreate.
+The URI host must be `mongo.YOURDOMAIN.com`, not the IP address.
 
-### `dependency failed to start: container mongodb-prod-mongo is unhealthy`
+### `connection closed` after enabling TLS
 
-1. Fix mongo startup first (`docker compose logs mongo`).
-2. Backup service waits for healthy mongo — it will start after mongo is OK.
+The client is missing `tls=true`, or still using the IP. Use the URI from step 9.
 
-### Healthcheck / auth errors
+### certbot fails
 
-Confirm `.env` has `MONGO_ROOT_USERNAME` and `MONGO_ROOT_PASSWORD` set. Recreate after changing password on existing data dir may require manual user fix — on **first** deploy only init creates the root user.
+- DNS A record not pointing to this server yet
+- Port 80 blocked in the security group
+- Run again: `docker compose stop mongo` then `sudo -E ./scripts/setup-letsencrypt-tls.sh`
 
-## 6. Apply changes on running EC2
+### Backup container does not start
 
-```bash
-git pull
-# edit .env if MONGO_MEMORY_LIMIT or passwords changed
-docker compose up -d --force-recreate mongo
-docker compose ps
-docker compose logs mongo --tail=10
-```
+Fix `mongo` first. Backup waits until mongo is healthy.
 
-## 7. Uninstall
+---
+
+## Remove everything
 
 ```bash
+cd /opt/mongo/mongodb-simple-production
 docker compose down
 sudo rm -rf /var/lib/mongodb /var/backups/mongodb
 ```
 
-Use `docker compose down -v` only if you use named volumes (this stack uses host bind mounts; remove paths manually as above).
+This deletes all databases and backups.

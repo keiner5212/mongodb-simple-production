@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 : "${MONGO_HOST:=mongo}"
 : "${MONGO_PORT:=27017}"
@@ -8,9 +8,31 @@ set -euo pipefail
 : "${BACKUP_PATH:=/backup}"
 : "${BACKUP_INTERVAL_HOURS:=24}"
 : "${BACKUP_MAX_COUNT:=14}"
+: "${MONGO_TLS_ENABLED:=false}"
 
 log() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
+}
+
+if ! [[ "${BACKUP_INTERVAL_HOURS}" =~ ^[0-9]+$ ]] || (( BACKUP_INTERVAL_HOURS < 1 )); then
+  log "ERROR: BACKUP_INTERVAL_HOURS must be a positive integer"
+  exit 1
+fi
+
+if ! [[ "${BACKUP_MAX_COUNT}" =~ ^[0-9]+$ ]] || (( BACKUP_MAX_COUNT < 1 )); then
+  log "ERROR: BACKUP_MAX_COUNT must be a positive integer"
+  exit 1
+fi
+
+interval_seconds=$(( BACKUP_INTERVAL_HOURS * 3600 ))
+
+mongo_client_args() {
+  # shellcheck source=/dev/null
+  source /usr/local/bin/mongo-tls-client-args.sh
+  MONGO_CLIENT_ARGS=(--host "${MONGO_HOST}" --port "${MONGO_PORT}")
+  if (( ${#MONGO_TLS_CLI_ARGS[@]} > 0 )); then
+    MONGO_CLIENT_ARGS+=("${MONGO_TLS_CLI_ARGS[@]}")
+  fi
 }
 
 wait_for_mongo() {
@@ -18,10 +40,10 @@ wait_for_mongo() {
   local delay=5
   local i
 
-  for ((i = 1; i <= retries; i++)); do
+  for (( i = 1; i <= retries; i++ )); do
+    mongo_client_args || return 1
     if mongosh --quiet \
-      --host "${MONGO_HOST}" \
-      --port "${MONGO_PORT}" \
+      "${MONGO_CLIENT_ARGS[@]}" \
       -u "${MONGO_ROOT_USERNAME}" \
       -p "${MONGO_ROOT_PASSWORD}" \
       --authenticationDatabase admin \
@@ -47,9 +69,9 @@ run_backup() {
   mkdir -p "${dest}"
 
   log "Starting backup -> ${dest}"
+  mongo_client_args || return 1
   mongodump \
-    --host "${MONGO_HOST}" \
-    --port "${MONGO_PORT}" \
+    "${MONGO_CLIENT_ARGS[@]}" \
     -u "${MONGO_ROOT_USERNAME}" \
     -p "${MONGO_ROOT_PASSWORD}" \
     --authenticationDatabase admin \
@@ -61,6 +83,9 @@ run_backup() {
 
 prune_old_backups() {
   local count
+  local to_remove
+  local i
+  local old
 
   mapfile -t backups < <(find "${BACKUP_PATH}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
   count="${#backups[@]}"
@@ -70,27 +95,15 @@ prune_old_backups() {
     return 0
   fi
 
-  local to_remove=$((count - BACKUP_MAX_COUNT))
+  to_remove=$(( count - BACKUP_MAX_COUNT ))
   log "Pruning ${to_remove} old backup(s), keeping ${BACKUP_MAX_COUNT}"
 
-  for ((i = 0; i < to_remove; i++)); do
-    local old="${BACKUP_PATH}/${backups[$i]}"
+  for (( i = 0; i < to_remove; i++ )); do
+    old="${BACKUP_PATH}/${backups[$i]}"
     log "Removing ${old}"
     rm -rf "${old}"
   done
 }
-
-interval_seconds=$((BACKUP_INTERVAL_HOURS * 3600))
-
-if ! [[ "${BACKUP_INTERVAL_HOURS}" =~ ^[0-9]+$ ]] || (( BACKUP_INTERVAL_HOURS < 1 )); then
-  log "ERROR: BACKUP_INTERVAL_HOURS must be a positive integer"
-  exit 1
-fi
-
-if ! [[ "${BACKUP_MAX_COUNT}" =~ ^[0-9]+$ ]] || (( BACKUP_MAX_COUNT < 1 )); then
-  log "ERROR: BACKUP_MAX_COUNT must be a positive integer"
-  exit 1
-fi
 
 mkdir -p "${BACKUP_PATH}"
 wait_for_mongo
