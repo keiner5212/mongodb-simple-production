@@ -83,7 +83,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Both services should be up; `mongo` should be **healthy**.
+Both services should be **running**.
 
 Test login:
 

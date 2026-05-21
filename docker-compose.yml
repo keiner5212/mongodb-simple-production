@@ -24,7 +24,6 @@ services:
       - ${MONGO_CONFIG_DIR}:/data/configdb
       - ${MONGO_TLS_DIR:-/var/lib/mongodb/tls}:/etc/mongo/tls:ro
       - ./scripts/mongod-entrypoint.sh:/usr/local/bin/mongod-custom-entrypoint.sh:ro
-      - ./scripts/mongo-healthcheck.sh:/usr/local/bin/mongo-healthcheck.sh:ro
       - ./scripts/mongo-tls-client-args.sh:/usr/local/bin/mongo-tls-client-args.sh:ro
     entrypoint: ["/bin/bash", "/usr/local/bin/mongod-custom-entrypoint.sh"]
     networks:
@@ -32,12 +31,6 @@ services:
     ports:
       # Bind to all interfaces; secure with firewall or security group
       - "${MONGO_PORT:-27017}:27017"
-    healthcheck:
-      test: ["CMD", "/bin/bash", "/usr/local/bin/mongo-healthcheck.sh"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
     ulimits:
       nofile:
         soft: 64000
@@ -75,7 +68,7 @@ services:
       - ./scripts/mongo-tls-client-args.sh:/usr/local/bin/mongo-tls-client-args.sh:ro
     depends_on:
       mongo:
-        condition: service_healthy
+        condition: service_started
     networks:
       - mongodb_internal
     logging:
