@@ -15,7 +15,7 @@ args=(
 )
 
 if ((${#MONGO_TLS_CLI_ARGS[@]} > 0)); then
-  args+=("${MONGO_TLS_CLI_ARGS[@]}")
+  args+=("${MONGO_TLS_CLI_ARGS[@]}" --tlsAllowInvalidHostnames)
 fi
 
 exec mongosh "${args[@]}" --eval "db.adminCommand('ping').ok"
