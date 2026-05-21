@@ -27,10 +27,7 @@ services:
       - ./scripts/mongo-tls-client-args.sh:/usr/local/bin/mongo-tls-client-args.sh:ro
     entrypoint: ["/bin/bash", "/usr/local/bin/mongod-custom-entrypoint.sh"]
     networks:
-      mongodb_internal:
-        aliases:
-          - mongo
-          - ${MONGO_TLS_DOMAIN:-mongo}
+      - mongodb_internal
     ports:
       # Bind to all interfaces; secure with firewall or security group
       - "${MONGO_PORT:-27017}:27017"
@@ -67,8 +64,8 @@ services:
       BACKUP_PATH: /backup
     volumes:
       - ${BACKUP_HOST_DIR}:/backup
-      - ${MONGO_TLS_DIR:-/var/lib/mongodb/tls}:/etc/mongo/tls:ro
-      - ./scripts/mongo-tls-client-args.sh:/usr/local/bin/mongo-tls-client-args.sh:ro
+    extra_hosts:
+      - "${MONGO_TLS_DOMAIN:-mongo.invalid}:host-gateway"
     depends_on:
       mongo:
         condition: service_started

@@ -10,6 +10,8 @@ set -Eeuo pipefail
 : "${BACKUP_MAX_COUNT:=14}"
 : "${MONGO_TLS_ENABLED:=false}"
 
+unset ALL_PROXY HTTP_PROXY HTTPS_PROXY http_proxy https_proxy all_proxy 2>/dev/null || true
+
 log() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
@@ -26,43 +28,48 @@ fi
 
 interval_seconds=$(( BACKUP_INTERVAL_HOURS * 3600 ))
 
-mongo_target_host() {
+urlencode() {
+  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+# Same connection string as external clients (Compass, apps). With TLS, host is MONGO_TLS_DOMAIN
+# and extra_hosts in compose maps that name to the host gateway (published port 27017).
+mongo_uri() {
+  local host params
+
   if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
     if [[ -z "${MONGO_TLS_DOMAIN:-}" ]]; then
       log "ERROR: MONGO_TLS_DOMAIN is required in .env when MONGO_TLS_ENABLED=true"
       return 1
     fi
-    printf '%s' "${MONGO_TLS_DOMAIN}"
+    host="${MONGO_TLS_DOMAIN}"
+    params="tls=true&authSource=admin&directConnection=true"
   else
-    printf '%s' "${MONGO_HOST:-mongo}"
+    host="${MONGO_HOST:-mongo}"
+    params="authSource=admin&directConnection=true"
   fi
-}
 
-mongo_client_args() {
-  local host
-  # shellcheck source=/dev/null
-  source /usr/local/bin/mongo-tls-client-args.sh
-  host="$(mongo_target_host)" || return 1
-  MONGO_CLIENT_ARGS=(--host "${host}" --port "${MONGO_PORT}")
-  if (( ${#MONGO_TLS_CLI_ARGS[@]} > 0 )); then
-    MONGO_CLIENT_ARGS+=("${MONGO_TLS_CLI_ARGS[@]}")
-  fi
+  printf 'mongodb://%s:%s@%s:%s/?%s' \
+    "$(urlencode "${MONGO_ROOT_USERNAME}")" \
+    "$(urlencode "${MONGO_ROOT_PASSWORD}")" \
+    "${host}" "${MONGO_PORT}" "${params}"
 }
 
 wait_for_mongo() {
   local retries=30
   local delay=5
   local i
+  local uri
+
+  uri="$(mongo_uri)" || return 1
 
   for (( i = 1; i <= retries; i++ )); do
-    mongo_client_args || return 1
-    if mongosh --quiet \
-      "${MONGO_CLIENT_ARGS[@]}" \
-      -u "${MONGO_ROOT_USERNAME}" \
-      -p "${MONGO_ROOT_PASSWORD}" \
-      --authenticationDatabase admin \
-      --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; then
-      log "MongoDB reachable at $(mongo_target_host):${MONGO_PORT}"
+    if mongosh "${uri}" --quiet --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; then
+      if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
+        log "MongoDB reachable at ${MONGO_TLS_DOMAIN}:${MONGO_PORT} (external-style TLS)"
+      else
+        log "MongoDB reachable at ${MONGO_HOST}:${MONGO_PORT}"
+      fi
       return 0
     fi
     log "Waiting for MongoDB (${i}/${retries})..."
@@ -76,21 +83,16 @@ wait_for_mongo() {
 run_backup() {
   local stamp
   local dest
+  local uri
 
   stamp="$(date -u +'%Y%m%dT%H%M%SZ')"
   dest="${BACKUP_PATH}/${stamp}"
+  uri="$(mongo_uri)" || return 1
 
   mkdir -p "${dest}"
 
   log "Starting backup -> ${dest}"
-  mongo_client_args || return 1
-  mongodump \
-    "${MONGO_CLIENT_ARGS[@]}" \
-    -u "${MONGO_ROOT_USERNAME}" \
-    -p "${MONGO_ROOT_PASSWORD}" \
-    --authenticationDatabase admin \
-    --gzip \
-    --out "${dest}"
+  mongodump --uri="${uri}" --gzip --out "${dest}"
 
   log "Backup finished: ${dest}"
 }
