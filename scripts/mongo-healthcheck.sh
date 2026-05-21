@@ -1,23 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+unset ALL_PROXY HTTP_PROXY HTTPS_PROXY http_proxy https_proxy all_proxy 2>/dev/null || true
+
 user="${MONGO_INITDB_ROOT_USERNAME:?}"
 pass="${MONGO_INITDB_ROOT_PASSWORD:?}"
 
-# shellcheck source=/dev/null
-source /usr/local/bin/mongo-tls-client-args.sh
+urlencode() {
+  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
 
-args=(
-  --quiet
-  --host 127.0.0.1
-  --port 27017
-  -u "$user"
-  -p "$pass"
-  --authenticationDatabase admin
-)
-
-if ((${#MONGO_TLS_CLI_ARGS[@]} > 0)); then
-  args+=("${MONGO_TLS_CLI_ARGS[@]}")
+params="authSource=admin&directConnection=true"
+if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]] || [[ -f /etc/mongo/tls/server.pem ]]; then
+  params="${params}&tls=true&tlsAllowInvalidHostnames=true&tlsAllowInvalidCertificates=true"
 fi
 
-exec mongosh "${args[@]}" --eval "db.adminCommand('ping').ok"
+uri="mongodb://$(urlencode "$user"):$(urlencode "$pass")@127.0.0.1:27017/?${params}"
+
+exec mongosh "$uri" --quiet --eval "db.adminCommand('ping').ok"

@@ -68,7 +68,12 @@ if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
     exit 1
   fi
 
-  tls_args+=(--tlsMode "$tls_mode" --tlsCertificateKeyFile "$tls_pem" --tlsCAFile "$tls_ca")
+  tls_args+=(
+    --tlsMode "$tls_mode"
+    --tlsCertificateKeyFile "$tls_pem"
+    --tlsCAFile "$tls_ca"
+    --tlsAllowConnectionsWithoutCertificates
+  )
   echo "mongod-entrypoint: TLS enabled mode=${tls_mode}" >&2
 fi
 

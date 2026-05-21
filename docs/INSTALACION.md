@@ -109,13 +109,11 @@ In your domain provider, add:
 |------|------|--------|
 | A | `mongo` | Your EC2 **public** IP (use an Elastic IP so it does not change) |
 
-Check:
-
 ```bash
 dig +short mongo.YOURDOMAIN.com
 ```
 
-It must show your EC2 IP before continuing.
+Must return your EC2 public IP.
 
 Security group: allow inbound **TCP 80** and **TCP 27017** (TCP 80 is only needed to get the certificate).
 
@@ -133,6 +131,8 @@ sudo -E ./scripts/setup-letsencrypt-tls.sh
 
 Mongo stops for about one minute while certbot uses port 80. Your data in `/var/lib/mongodb/data` is not deleted.
 
+Creates `server.pem`, `ca.pem`, and `chown 999:999` on the TLS directory.
+
 ### 9. Enable TLS on the server
 
 Edit `.env`:
@@ -149,7 +149,7 @@ docker compose up -d --build --force-recreate
 docker compose logs mongo --tail=15
 ```
 
-You should see: `mongod-entrypoint: TLS enabled mode=requireTLS`.
+Logs should show `TLS enabled mode=requireTLS`, then `Waiting for connections` with `ssl:on`. MongoDB 8 needs `ca.pem` ([SERVER-72839](https://jira.mongodb.org/browse/SERVER-72839)); the entrypoint also sets `--tlsAllowConnectionsWithoutCertificates` so clients only need `tls=true` (no client certificate).
 
 ### 10. Update every client (required)
 
@@ -165,16 +165,7 @@ New connection:
 mongodb://admin:PASSWORD@mongo.YOURDOMAIN.com:27017/mydb?tls=true
 ```
 
-**mongosh from a laptop:**
-
-```bash
-mongosh "mongodb://mongo.YOURDOMAIN.com:27017" \
-  --tls -u admin -p --authenticationDatabase admin
-```
-
 **MongoDB Compass:** paste the new URI.
-
-People with changing home IPs are fine — only the hostname and `tls=true` matter.
 
 ---
 
@@ -204,20 +195,34 @@ Automatic dumps run every 24 hours into `/var/backups/mongodb`. See [BACKUP.md](
 
 ### `invalid option name` when mongo starts
 
-Windows line endings in scripts. Fix:
+CRLF in scripts:
 
 ```bash
 sed -i 's/\r$//' scripts/*.sh
 docker compose up -d --force-recreate mongo
 ```
 
-### `mongo` is unhealthy
+### `mongo` unhealthy but logs show `Waiting for connections`
+
+`mongod` is up; the Docker healthcheck fails. `mongo-backup` waits for `healthy`.
 
 ```bash
-docker compose logs mongo
+docker compose exec mongo /bin/bash /usr/local/bin/mongo-healthcheck.sh
+echo exit:$?
 ```
 
-Check `.env` password, TLS files (`/var/lib/mongodb/tls/server.pem`), and CRLF on scripts.
+| Log | Fix |
+|-----|-----|
+| `SERVER-72839` / chain of trust | Run `setup-letsencrypt-tls.sh` (`ca.pem` missing) |
+| `Permission denied` on `server.pem` | `sudo chown -R 999:999 /var/lib/mongodb/tls` |
+| `only allow SSL connections` | Client needs `tls=true` and the domain hostname |
+| `Ingress TLS handshake complete` then `No SSL certificate provided by peer; connection rejected` | `git pull`; entrypoint must pass `--tlsAllowConnectionsWithoutCertificates` |
+| `MongoServerSelectionError` from healthcheck | Same as previous row; update scripts and recreate |
+
+```bash
+git pull
+docker compose up -d --force-recreate mongo
+```
 
 ### `certificate verify failed` in Compass or an app
 
@@ -225,7 +230,7 @@ The URI host must be `mongo.YOURDOMAIN.com`, not the IP address.
 
 ### `connection closed` after enabling TLS
 
-The client is missing `tls=true`, or still using the IP. Use the URI from step 9.
+The client is missing `tls=true`, or still using the IP. Use the URI from step 10.
 
 ### certbot fails
 
@@ -235,7 +240,7 @@ The client is missing `tls=true`, or still using the IP. Use the URI from step 9
 
 ### Backup container does not start
 
-Fix `mongo` first. Backup waits until mongo is healthy.
+Fix `mongo` health first. Backup uses `depends_on: service_healthy`.
 
 ---
 
