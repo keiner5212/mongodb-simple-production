@@ -56,14 +56,19 @@ fi
 tls_args=()
 if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
   tls_pem="/etc/mongo/tls/server.pem"
+  tls_ca="/etc/mongo/tls/ca.pem"
   tls_mode="${MONGO_TLS_MODE:-requireTLS}"
 
   if [[ ! -f "$tls_pem" ]]; then
     echo "mongod-entrypoint: MONGO_TLS_ENABLED=true but missing ${tls_pem}. Run: sudo ./scripts/setup-letsencrypt-tls.sh" >&2
     exit 1
   fi
+  if [[ ! -f "$tls_ca" ]]; then
+    echo "mongod-entrypoint: MONGO_TLS_ENABLED=true but missing ${tls_ca}. Run: sudo ./scripts/setup-letsencrypt-tls.sh" >&2
+    exit 1
+  fi
 
-  tls_args+=(--tlsMode "$tls_mode" --tlsCertificateKeyFile "$tls_pem")
+  tls_args+=(--tlsMode "$tls_mode" --tlsCertificateKeyFile "$tls_pem" --tlsCAFile "$tls_ca")
   echo "mongod-entrypoint: TLS enabled mode=${tls_mode}" >&2
 fi
 

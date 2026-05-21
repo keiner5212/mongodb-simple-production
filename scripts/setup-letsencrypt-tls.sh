@@ -41,10 +41,13 @@ fi
 umask 077
 cat "${live}/fullchain.pem" "${live}/privkey.pem" >"${tls_dir}/server.pem"
 chmod 600 "${tls_dir}/server.pem"
+cp "${live}/chain.pem" "${tls_dir}/ca.pem"
+chmod 644 "${tls_dir}/ca.pem"
 
 trap - ERR
 
 echo "OK: ${tls_dir}/server.pem"
+echo "OK: ${tls_dir}/ca.pem"
 echo "Next in .env: MONGO_TLS_ENABLED=true and MONGO_TLS_MODE=requireTLS"
 echo "Then: docker compose up -d --force-recreate mongo"
 echo "Every client must use: mongodb://USER:PASS@${domain}:27017/DB?tls=true"
@@ -60,6 +63,8 @@ set -Eeuo pipefail
 umask 077
 cat "${live}/fullchain.pem" "${live}/privkey.pem" >"${tls_dir}/server.pem"
 chmod 600 "${tls_dir}/server.pem"
+cp "${live}/chain.pem" "${tls_dir}/ca.pem"
+chmod 644 "${tls_dir}/ca.pem"
 cd "${project_dir}"
 docker compose restart mongo
 EOF
