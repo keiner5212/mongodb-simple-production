@@ -43,6 +43,7 @@ cat "${live}/fullchain.pem" "${live}/privkey.pem" >"${tls_dir}/server.pem"
 chmod 600 "${tls_dir}/server.pem"
 cp "${live}/chain.pem" "${tls_dir}/ca.pem"
 chmod 644 "${tls_dir}/ca.pem"
+chown -R 999:999 "${tls_dir}"
 
 trap - ERR
 
@@ -65,6 +66,7 @@ cat "${live}/fullchain.pem" "${live}/privkey.pem" >"${tls_dir}/server.pem"
 chmod 600 "${tls_dir}/server.pem"
 cp "${live}/chain.pem" "${tls_dir}/ca.pem"
 chmod 644 "${tls_dir}/ca.pem"
+chown -R 999:999 "${tls_dir}"
 cd "${project_dir}"
 docker compose restart mongo
 EOF
