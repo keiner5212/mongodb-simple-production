@@ -117,7 +117,7 @@ dig +short mongo.YOURDOMAIN.com
 
 It must show your EC2 IP before continuing.
 
-Security group: allow inbound **80** and **27017** (80 is only needed to get the certificate).
+Security group: allow inbound **TCP 80** and **TCP 27017** (TCP 80 is only needed to get the certificate).
 
 ### 8. Get the certificate (on the server)
 
