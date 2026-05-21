@@ -140,7 +140,10 @@ Edit `.env`:
 ```env
 MONGO_TLS_ENABLED=true
 MONGO_TLS_MODE=requireTLS
+MONGO_TLS_DOMAIN=mongo.YOURDOMAIN.com
 ```
+
+`MONGO_TLS_DOMAIN` must match the certificate hostname (same value as `MONGO_TLS_DOMAIN` in the certbot step).
 
 Apply:
 
@@ -188,59 +191,6 @@ docker compose logs mongo --tail=30
 ### Backups
 
 Automatic dumps run every 24 hours into `/var/backups/mongodb`. See [BACKUP.md](BACKUP.md).
-
----
-
-## Common problems
-
-### `invalid option name` when mongo starts
-
-CRLF in scripts:
-
-```bash
-sed -i 's/\r$//' scripts/*.sh
-docker compose up -d --force-recreate mongo
-```
-
-### `mongo` unhealthy but logs show `Waiting for connections`
-
-`mongod` is up; the Docker healthcheck fails. `mongo-backup` waits for `healthy`.
-
-```bash
-docker compose exec mongo /bin/bash /usr/local/bin/mongo-healthcheck.sh
-echo exit:$?
-```
-
-| Log | Fix |
-|-----|-----|
-| `SERVER-72839` / chain of trust | Run `setup-letsencrypt-tls.sh` (`ca.pem` missing) |
-| `Permission denied` on `server.pem` | `sudo chown -R 999:999 /var/lib/mongodb/tls` |
-| `only allow SSL connections` | Client needs `tls=true` and the domain hostname |
-| `Ingress TLS handshake complete` then `No SSL certificate provided by peer; connection rejected` | `git pull`; entrypoint must pass `--tlsAllowConnectionsWithoutCertificates` |
-| `MongoServerSelectionError` from healthcheck | Same as previous row; update scripts and recreate |
-
-```bash
-git pull
-docker compose up -d --force-recreate mongo
-```
-
-### `certificate verify failed` in Compass or an app
-
-The URI host must be `mongo.YOURDOMAIN.com`, not the IP address.
-
-### `connection closed` after enabling TLS
-
-The client is missing `tls=true`, or still using the IP. Use the URI from step 10.
-
-### certbot fails
-
-- DNS A record not pointing to this server yet
-- Port 80 blocked in the security group
-- Run again: `docker compose stop mongo` then `sudo -E ./scripts/setup-letsencrypt-tls.sh`
-
-### Backup container does not start
-
-Fix `mongo` health first. Backup uses `depends_on: service_healthy`.
 
 ---
 

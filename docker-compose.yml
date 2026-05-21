@@ -13,8 +13,10 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_PORT: ${MONGO_PORT:-27017}
       MONGO_TLS_ENABLED: ${MONGO_TLS_ENABLED:-false}
       MONGO_TLS_MODE: ${MONGO_TLS_MODE:-requireTLS}
+      MONGO_TLS_DOMAIN: ${MONGO_TLS_DOMAIN:-}
       MONGO_TLS_DIR: /etc/mongo/tls
     volumes:
       # Host bind mount: survives container recreation; easy to snapshot on EC2
@@ -62,6 +64,7 @@ services:
       MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       MONGO_TLS_ENABLED: ${MONGO_TLS_ENABLED:-false}
+      MONGO_TLS_DOMAIN: ${MONGO_TLS_DOMAIN:-}
       MONGO_TLS_DIR: /etc/mongo/tls
       BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS}
       BACKUP_MAX_COUNT: ${BACKUP_MAX_COUNT}

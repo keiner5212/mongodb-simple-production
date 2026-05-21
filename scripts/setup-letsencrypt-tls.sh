@@ -49,7 +49,7 @@ trap - ERR
 
 echo "OK: ${tls_dir}/server.pem"
 echo "OK: ${tls_dir}/ca.pem"
-echo "Next in .env: MONGO_TLS_ENABLED=true and MONGO_TLS_MODE=requireTLS"
+echo "Next in .env: MONGO_TLS_ENABLED=true, MONGO_TLS_MODE=requireTLS, MONGO_TLS_DOMAIN=${domain}"
 echo "Then: docker compose up -d --force-recreate mongo"
 echo "Every client must use: mongodb://USER:PASS@${domain}:27017/DB?tls=true"
 echo "Enable TLS only after all clients are ready to switch."

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# TLS client flags for mongosh/mongodump (public CA / Let's Encrypt).
-# SOURCE ONLY — do not execute directly: source /usr/local/bin/mongo-tls-client-args.sh
+# SOURCE ONLY
 MONGO_TLS_CLI_ARGS=()
 
-if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]] || [[ -f /etc/mongo/tls/server.pem ]]; then
-  MONGO_TLS_CLI_ARGS=(--tls --tlsAllowInvalidHostnames --directConnection)
+if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
+  MONGO_TLS_CLI_ARGS=(--tls --directConnection)
+  if [[ -n "${MONGO_TLS_DOMAIN:-}" ]]; then
+    MONGO_TLS_CLI_ARGS+=(--tlsServername "${MONGO_TLS_DOMAIN}")
+  fi
 fi

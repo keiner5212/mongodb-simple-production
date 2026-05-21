@@ -5,16 +5,13 @@ unset ALL_PROXY HTTP_PROXY HTTPS_PROXY http_proxy https_proxy all_proxy 2>/dev/n
 
 user="${MONGO_INITDB_ROOT_USERNAME:?}"
 pass="${MONGO_INITDB_ROOT_PASSWORD:?}"
+port="${MONGO_PORT:-27017}"
 
-urlencode() {
-  python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
-}
-
-params="authSource=admin&directConnection=true"
-if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]] || [[ -f /etc/mongo/tls/server.pem ]]; then
-  params="${params}&tls=true&tlsAllowInvalidHostnames=true&tlsAllowInvalidCertificates=true"
+if [[ "${MONGO_TLS_ENABLED:-false}" == "true" ]]; then
+  domain="${MONGO_TLS_DOMAIN:?MONGO_TLS_DOMAIN must match the certificate (e.g. mongo.example.com)}"
+  uri="mongodb://127.0.0.1:${port}/?tls=true&authSource=admin&directConnection=true&tlsServerName=${domain}"
+else
+  uri="mongodb://127.0.0.1:${port}/?authSource=admin&directConnection=true"
 fi
 
-uri="mongodb://$(urlencode "$user"):$(urlencode "$pass")@127.0.0.1:27017/?${params}"
-
-exec mongosh "$uri" --quiet --eval "db.adminCommand('ping').ok"
+exec mongosh "$uri" --quiet -u "$user" -p "$pass" --eval 'db.adminCommand("ping").ok'
